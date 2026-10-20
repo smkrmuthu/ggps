@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GGBS Statistics</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{background:#f1f5f9;color:#0f172a;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// ====== CONFIG: paste your Supabase values here (Project Settings > API) ======
+const SUPABASE_URL='https://kpfnodbbmguqblbhrzqj.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtwZm5vZGJibWd1cWJsYmhyenFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0NzQzNjAsImV4cCI6MjEwNzA1MDM2MH0.t4vu2PukFarWMpz3bt5Bvt7DelaoXoknSwQjwJn8DOg';
+// ===========================================================================
+const {useState,useMemo,useEffect}=React;
+const sb=SUPABASE_URL.startsWith('http')?window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
+const toRow=e=>({ym:e.ym,oem:e.oem,avs:e.avg,oth:e.oth,inc:e.inc,exp:e.exp});
+const fromRow=r=>({id:r.id,ym:r.ym,oem:+r.oem,avg:+r.avs,oth:+r.oth,inc:r.inc==null?null:+r.inc,exp:r.exp==null?null:+r.exp,ts:Date.parse(r.created_at)});
+const html=htm.bind(React.createElement);
+const r2=x=>Math.round((x+Number.EPSILON)*100)/100;
+const fmt=n=>Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const inr=n=>'₹'+fmt(n);
+const mlabel=(ym,long)=>{const[y,m]=ym.split('-').map(Number);return new Date(y,m-1,1).toLocaleString('en-US',{month:long?'long':'short',year:'numeric'})};
+const fyOf=ym=>{const[y,m]=ym.split('-').map(Number);const s=m>=4?y:y-1;return 'FY '+s+'-'+String((s+1)%100).padStart(2,'0')};
+const now=new Date();
+const CUR=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+const CFY=fyOf(CUR),FYS=Array.from({length:(+CFY.slice(3,7))-2021},(_,i)=>{const y=2022+i;return 'FY '+y+'-'+String((y+1)%100).padStart(2,'0')});
+const has=v=>v!==null&&v!==undefined;
+const total=m=>r2(m.oem+m.avg+m.oth);
+
+function aggregate(entries){
+  const map={};
+  entries.forEach(e=>{
+    const m=map[e.ym]||(map[e.ym]={ym:e.ym,oem:0,avg:0,oth:0,inc:null,exp:null,n:0});
+    m.oem=r2(m.oem+e.oem);m.avg=r2(m.avg+e.avg);m.oth=r2(m.oth+e.oth);m.n++;
+    if(has(e.inc))m.inc=r2((m.inc||0)+e.inc);
+    if(has(e.exp))m.exp=r2((m.exp||0)+e.exp);
+  });
+  return Object.values(map).sort((a,b)=>a.ym.localeCompare(b.ym));
+}
+function PL({inc,exp,big}){
+  if(!has(inc)||!has(exp))return html`<span className="text-slate-400 font-bold">-</span>`;
+  const d=r2(inc-exp);
+  return d>=0?html`<span className="font-extrabold text-green-600">+${inr(d)}</span>`:html`<span className="font-extrabold text-red-600">-${inr(Math.abs(d))}</span>`;
+}
+const Val=({v,money})=>has(v)?(money?inr(v):fmt(v)):'-';
+
+function Chart({labels,series,sel,extra,money,f}){
+  const n=labels.length,gw=Math.max(80,36+series.length*30),W=Math.max(n*gw+60,520),H=extra?270:250,base=210,top=20;
+  const max=Math.max(1,...series.flatMap(s=>s.vals.map(v=>v||0)));
+  const bw=Math.min(34,(gw-24)/series.length);
+  const short=v=>v>=1e7?(v/1e7).toFixed(1)+'Cr':v>=1e5?(v/1e5).toFixed(1)+'L':v>=1e3?(v/1e3).toFixed(1)+'k':v.toFixed(0);
+  return html`<div><svg viewBox=${'0 0 '+W+' '+H} style=${{width:'100%',height:'auto'}}>
+    ${[0,.25,.5,.75,1].map(t=>html`<g key=${t}><line x1="50" x2=${W-5} y1=${base-t*(base-top)} y2=${base-t*(base-top)} stroke="#cbd5e1" strokeDasharray="3 3"/><text x="46" y=${base-t*(base-top)+4} fontSize="10" textAnchor="end" fill="#64748b">${f(max*t)}</text></g>`)}
+    ${labels.map((l,i)=>{
+      const gx=55+i*gw+(gw-bw*series.length)/2;
+      return html`<g key=${l.ym}>
+        ${l.ym===sel&&html`<rect x=${55+i*gw} y=${top-8} width=${gw} height=${base-top+40} fill="#1E3A8A" opacity="0.07"/>`}
+        ${series.map((s,j)=>{const v=s.vals[i];if(!has(v))return null;const bh=(v/max)*(base-top);
+          return html`<g key=${j}><rect x=${gx+j*bw} y=${base-bh} width=${bw-3} height=${Math.max(bh,1)} fill=${s.color}><title>${s.name+' · '+l.text+': '+(money?inr(v):fmt(v))}</title></rect><text x=${gx+j*bw+(bw-3)/2} y=${base-bh-4} textAnchor="middle" fontSize="9" fontWeight="800" fill="#0f172a">${f(v)}</text></g>`})}
+        <text x=${55+i*gw+gw/2} y=${base+16} textAnchor="middle" fontSize="11" fontWeight=${l.ym===sel?'800':'500'} fill="#0f172a">${l.text}</text>
+        ${extra&&html`<text x=${55+i*gw+gw/2} y=${base+34} textAnchor="middle" fontSize="11" fontWeight="800" fill=${extra[i].c}>${extra[i].t}</text>`}
+      </g>`})}
+    <line x1="50" x2=${W-5} y1=${base} y2=${base} stroke="#0f172a" strokeWidth="2"/>
+  </svg></div>`;
+}
+const Legend=({items})=>html`<div className="flex flex-wrap gap-4 text-xs font-bold text-slate-600 mb-2">${items.map(i=>html`<span key=${i[0]} className="flex items-center gap-1.5"><i className="inline-block w-3 h-3 " style=${{background:i[1]}}></i>${i[0]}</span>`)}</div>`;
+const Panel=({title,children,right})=>html`<section className="bg-white border-2 border-slate-900 p-4 sm:p-5 shadow-[4px_4px_0_0_#0F172A]"><div className="flex items-center justify-between mb-3 gap-2"><h2 className="font-black text-slate-900 uppercase tracking-wide text-sm sm:text-base">${title}</h2>${right}</div>${children}</section>`;
+const Empty=({text})=>html`<div className="border-2 border-dashed border-slate-300 p-8 text-center text-slate-500 font-medium">📭 ${text}</div>`;
+
+const WIN=6;
+const qk=v=>(v/1000).toFixed(2)+'k',mL=v=>(v/1e5).toFixed(2)+'L';
+function Arrows({start,len,onShift}){
+  const b="px-3 py-1 bg-slate-900 text-white font-black disabled:opacity-30";
+  return html`<div className="flex items-center gap-1"><button className=${b} disabled=${start<=0} onClick=${()=>onShift(-1)}>◀</button><button className=${b} disabled=${start+WIN>=len} onClick=${()=>onShift(1)}>▶</button></div>`;
+}
+function Dashboard({months:all}){
+  const [mode,setMode]=useState('month'),[selYm,setSel]=useState(null),[fySel,setFySel]=useState(''),[offA,setOffA]=useState(0),[offF,setOffF]=useState(0),[rfm,setRfm]=useState(''),[rfy,setRfy]=useState(''),[rtm,setRtm]=useState(''),[rty,setRty]=useState('');
+  if(!all.length)return html`<div className="space-y-5"><${Empty} text="No data yet. A Master Admin can add GGBS quantities in the GGBS Summary tab and the dashboard will light up here."/></div>`;
+  const earliest=all[0].ym,latest=all[all.length-1].ym;
+  const from=rfm&&rfy?rfy+'-'+rfm:earliest,to=rtm&&rty?rty+'-'+rtm:latest;
+  const fyR=x=>{const y=+x.slice(3,7),e=(y+1)+'-03';return{f:y+'-04',t:e>CUR?CUR:e}};
+  const isM=mode==='month';
+  let idx=all.findIndex(x=>x.ym===selYm);if(idx<0)idx=all.length-1;
+  const curYm=isM?all[idx].ym:'';
+  const scope=mode==='fy'?all.filter(x=>x.ym>=fyR(fySel).f&&x.ym<=fyR(fySel).t):mode==='range'?all.filter(x=>x.ym>=from&&x.ym<=to):all;
+  const offs=()=>{setOffA(0);setOffF(0)};
+  const clearR=()=>{setRfm('');setRfy('');setRtm('');setRty('')};
+  const pickMonth=ym=>{setMode('month');setSel(ym);setFySel('');clearR();offs()};
+  const pickFy=x=>{if(!x)return;setMode('fy');setFySel(x);setSel(null);clearR();offs()};
+  const rangeSet=fn=>v=>{fn(v);setMode('range');setFySel('');setSel(null);offs()};
+  const goLife=()=>{setMode('life');setSel(null);setFySel('');clearR();offs()};
+  const goReset=()=>{setMode('month');setSel(null);setFySel('');clearR();offs()};
+  const yrs=[...new Set(all.map(x=>x.ym.slice(0,4)))].sort().reverse();
+  const mopts=isM?all.filter(x=>x.ym.startsWith(curYm.slice(0,4))).map(x=>x.ym.slice(5)):[...new Set(all.map(x=>x.ym.slice(5)))].sort();
+  const onMon=v=>{if(!v)return;const c=all.filter(x=>x.ym.slice(5)===v);pickMonth(isM&&c.find(x=>x.ym.startsWith(curYm.slice(0,4)))?curYm.slice(0,4)+'-'+v:c[c.length-1].ym)};
+  const onYr=y=>{if(!y)return;const c=all.filter(x=>x.ym.startsWith(y));pickMonth((isM&&c.find(x=>x.ym.slice(5)===curYm.slice(5))||c[c.length-1]).ym)};
+  const sc="px-3 py-2 bg-white text-slate-900 font-bold border-2 border-white";
+  const fromOk=!!(rfm&&rfy);
+  const onF=kind=>v=>{const nm=kind==='m'?v:rfm,ny=kind==='y'?v:rfy;setRfm(nm);setRfy(ny);if(nm&&ny&&rty&&(+rty<+ny||(rtm&&rty+'-'+rtm<=ny+'-'+nm))){setRtm('');setRty('')}setMode('range');setFySel('');setSel(null);offs()};
+  const allMon=MN.map((n,i)=>[String(i+1).padStart(2,'0'),n]);
+  const toOk=!!(rtm&&rty);
+  const fromMon=allMon.filter(o=>!(toOk&&rfy===rty&&o[0]>=rtm));
+  const fromYrs=YEARS.filter(y=>!toOk||y<+rty||(y===+rty&&rtm>'01'&&!(rfm&&rfm>=rtm)));
+  const toMon=allMon.filter(o=>!(fromOk&&rty===rfy&&o[0]<=rfm));
+  const toYrs=YEARS.filter(y=>!fromOk||(y>+rfy)||(y===+rfy&&rfm<'12'&&!(rtm&&rtm<=rfm)));
+  const rp=[['From',rfm,onF('m'),rfy,onF('y'),fromMon,fromYrs],['To',rtm,rangeSet(setRtm),rty,rangeSet(setRty),toMon,toYrs]];
+  const bar=html`<div className="flex flex-wrap items-center gap-x-6 gap-y-3 bg-slate-900 text-white p-3 border-2 border-slate-900">
+    <div className="flex flex-wrap items-center gap-3 w-full">
+      <span className="font-black text-sm uppercase tracking-wide">Select Month</span>
+      <select value=${isM?curYm.slice(5):''} onChange=${e=>onMon(e.target.value)} className=${sc}><option value="">Select</option>${mopts.map(v=>html`<option key=${v} value=${v}>${MN[+v-1]}</option>`)}</select>
+      <select value=${isM?curYm.slice(0,4):''} onChange=${e=>onYr(e.target.value)} className=${sc}><option value="">Select</option>${yrs.map(y=>html`<option key=${y} value=${y}>${y}</option>`)}</select>
+      <span className="text-[11px] text-blue-200 font-semibold">Only months with data are listed</span>
+      <span className="ml-auto flex gap-2"><button onClick=${goLife} className=${'px-4 py-2 border-2 border-white font-black text-sm '+(mode==='life'?'bg-white text-slate-900':'hover:bg-blue-900')}>Lifetime</button><button onClick=${goReset} className="px-3 py-2 border-2 border-white font-bold text-sm hover:bg-blue-900">↺ Reset</button></span>
+    </div>
+    <div className="w-full flex flex-wrap items-center gap-x-6 gap-y-3 border-t-2 border-blue-800 pt-4">
+      <span className="font-black text-sm uppercase tracking-wide">Financial Year</span>
+      <select className=${sc} value=${mode==='fy'?fySel:''} onChange=${e=>pickFy(e.target.value)}><option value="">Select</option>${[...FYS].reverse().map(x=>html`<option key=${x} value=${x}>${x}${x===CFY?' (Current)':''}</option>`)}</select>
+      <span className="hidden sm:block w-0.5 h-8 bg-blue-700"></span>
+      ${rp.map(r=>html`<div key=${r[0]} className="flex items-center gap-2"><span className="font-black text-sm uppercase">${r[0]}</span><select className=${sc} value=${r[1]} onChange=${e=>r[2](e.target.value)}><option value="">Select</option>${r[5].map(o=>html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select><select className=${sc} value=${r[3]} onChange=${e=>r[4](e.target.value)}><option value="">Select</option>${r[6].map(v=>html`<option key=${v} value=${String(v)}>${v}</option>`)}</select></div>`)}
+    </div>
+  </div>`;
+  if(!scope.length)return html`<div className="space-y-5">${bar}<${Empty} text="No records for this selection. Pick another Financial Year or date range."/></div>`;
+  const cm=mode==='fy'||mode==='range'?scope:all;
+  const fin=cm.filter(x=>has(x.inc)&&has(x.exp));
+  const sum=(l,k)=>r2(l.reduce((a,x)=>a+(x[k]||0),0));
+  const sfin=scope.filter(x=>has(x.inc)&&has(x.exp));
+  const m=isM?all[idx]:{oem:sum(scope,'oem'),avg:sum(scope,'avg'),oth:sum(scope,'oth'),inc:scope.some(x=>has(x.inc))?sum(scope,'inc'):null,exp:scope.some(x=>has(x.exp))?sum(scope,'exp'):null,pinc:sfin.length?sum(sfin,'inc'):null,pexp:sfin.length?sum(sfin,'exp'):null};
+  const pinc=isM?m.inc:m.pinc,pexp=isM?m.exp:m.pexp;
+  const t=isM?{l:'Month / Year',v:mlabel(m.ym,true)}:mode==='fy'?{l:'Financial Year',v:fySel}:mode==='range'?(scope[0].ym===scope[scope.length-1].ym?{l:'Month / Year',v:mlabel(scope[0].ym,true)}:{l:'Date Range',v:mlabel(scope[0].ym)+' – '+mlabel(scope[scope.length-1].ym)}):{l:'Period',v:'Lifetime'};
+  const win=(list,si,off)=>{const mx=Math.max(0,list.length-WIN),b=(si<0?list.length-1:si)-3;const st=Math.max(0,Math.min(mx,b+off));return{st,b,items:list.slice(st,st+WIN)}};
+  const wA=win(cm,isM?idx:-1,offA),wF=win(fin,isM?fin.findIndex(x=>x.ym===m.ym):-1,offF);
+  const lab=l=>l.map(x=>({ym:x.ym,text:mlabel(x.ym)}));
+  const sel=isM?m.ym:null;
+  const Card=({l,children,dark})=>html`<div className=${'border-2 border-slate-900 p-4 '+(dark?'bg-slate-900 text-white':'bg-white')}><div className=${'text-[11px] font-bold uppercase tracking-wider '+(dark?'text-blue-200':'text-slate-500')}>${l}</div><div className="text-xl sm:text-2xl font-black mt-1 break-words">${children}</div></div>`;
+  return html`<div className="space-y-5">
+    ${bar}
+    <${Card} l=${t.l} dark=${true}>${t.v}${!isM&&scope.length>1&&html`<span className="ml-3 text-xs font-semibold text-blue-200">${scope.length} month${scope.length>1?'s':''}</span>`}<//>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <${Card} l="OEM Qty (MT)">${fmt(m.oem)}<//>
+      <${Card} l="AVS Qty (MT)">${fmt(m.avg)}<//>
+      <${Card} l="Others Qty (MT)">${fmt(m.oth)}<//>
+      <${Card} l="Total Qty (MT)" dark=${true}>${fmt(total(m))}<//>
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <${Card} l="Income"><${Val} v=${m.inc} money=${true}/><//>
+      <${Card} l="Expense"><${Val} v=${m.exp} money=${true}/><//>
+      <${Card} l=${isM?'Profit / Loss':'Profit / Loss (months with both)'}><${PL} inc=${pinc} exp=${pexp}/><//>
+    </div>
+    <${Panel} title="Total GGBS Quantity (MT, in k)" right=${html`<${Arrows} start=${wA.st} len=${cm.length} onShift=${d=>setOffA(wA.st-wA.b+d)}/>`}>
+      <${Chart} f=${qk} labels=${lab(wA.items)} sel=${sel} series=${[{name:'Total',color:'#1E3A8A',vals:wA.items.map(total)}]}/>
+    <//>
+    <${Panel} title="Customer Wise Breakdown (MT, in k)" right=${html`<${Arrows} start=${wA.st} len=${cm.length} onShift=${d=>setOffA(wA.st-wA.b+d)}/>`}>
+      <${Legend} items=${[['OEM','#1E3A8A'],['AVS','#3B82F6'],['Others','#94A3B8']]}/>
+      <${Chart} f=${qk} labels=${lab(wA.items)} sel=${sel} series=${[{name:'OEM',color:'#1E3A8A',vals:wA.items.map(x=>x.oem)},{name:'AVS',color:'#3B82F6',vals:wA.items.map(x=>x.avg)},{name:'Others',color:'#94A3B8',vals:wA.items.map(x=>x.oth)}]}/>
+    <//>
+    <${Panel} title="Financial Overview (₹, in Lakh)" right=${fin.length>0&&html`<${Arrows} start=${wF.st} len=${fin.length} onShift=${d=>setOffF(wF.st-wF.b+d)}/>`}>
+      ${fin.length?html`<${Legend} items=${[['Income','#16A34A'],['Expense','#DC2626']]}/>
+      <${Chart} f=${mL} money=${true} labels=${lab(wF.items)} sel=${sel} series=${[{name:'Income',color:'#16A34A',vals:wF.items.map(x=>x.inc)},{name:'Expense',color:'#DC2626',vals:wF.items.map(x=>x.exp)}]} extra=${wF.items.map(x=>{const d=r2(x.inc-x.exp);return{t:(d>=0?'+':'-')+'₹'+mL(Math.abs(d)),c:d>=0?'#16a34a':'#dc2626'}})}/>`:html`<${Empty} text="Income and expense not entered for any month yet. Add them in the GGBS Summary tab to see this chart."/>`}
+    <//>
+  </div>`;
+}
+
+const blank={ym:'',oem:'',avg:'',oth:'',inc:'',exp:''};
+const Field=({l,req,children})=>html`<label className="block"><span className="text-xs font-bold uppercase tracking-wide text-slate-600">${l}${req&&html`<b className="text-red-600"> *</b>`}</span>${children}</label>`;
+const inCls="mt-1 w-full border-2 border-slate-900 px-3 py-2 font-semibold bg-white focus:outline-none focus:ring-4 focus:ring-blue-300";
+function FormFields({f,setF,defYm,locked,onYm}){
+  const P=k=>f[k]===''?0:(parseFloat(f[k])||0);
+  const live=r2(P('oem')+P('avg')+P('oth')),both=f.inc!==''&&f.exp!=='';
+  const num=k=>html`<input type="text" inputMode="decimal" placeholder="0.00" className=${inCls} disabled=${locked} style=${locked?{background:'#e2e8f0',color:'#475569',cursor:'not-allowed'}:null} value=${f[k]} onChange=${e=>{const v=e.target.value;if(/^\d*\.?\d{0,2}$/.test(v))setF({...f,[k]:v})}} onBlur=${()=>f[k]!==''&&f[k]!=='.'&&setF({...f,[k]:r2(parseFloat(f[k])||0).toFixed(2)})}/>`;
+  return html`<div className="space-y-3">
+    <div className="max-w-sm"><${Field} l="Month-Year" req=${true}><${MonthSel} value=${f.ym||defYm} onChange=${v=>{setF(p=>({...p,ym:v}));onYm&&onYm(v)}}/><//></div>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <${Field} l="OEM Qty (MT)" req=${true}>${num('oem')}<//>
+      <${Field} l="AVS Qty (MT)" req=${true}>${num('avg')}<//>
+      <${Field} l="Others Qty (MT)" req=${true}>${num('oth')}<//>
+      <div><span className="text-xs font-bold uppercase tracking-wide text-slate-600">Total Qty (MT)</span><div className="mt-1 w-full border-2 border-slate-900 bg-slate-900 text-white px-3 py-2 font-black">${fmt(live)}</div></div>
+    </div>
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <${Field} l="Income (₹)">${num('inc')}<//>
+      <${Field} l="Expense (₹)">${num('exp')}<//>
+      <div><span className="text-xs font-bold uppercase tracking-wide text-slate-600">Profit / Loss</span><div className="mt-1 w-full border-2 border-slate-900 bg-white px-3 py-2 text-base"><${PL} inc=${both?P('inc'):null} exp=${both?P('exp'):null}/></div></div>
+    </div>
+  </div>`;
+}
+function validate(f){
+  if(!f.ym)return 'Select a month.';
+  if(f.ym>CUR)return 'Future months are not allowed.';
+  if(f.oem===''||f.avg===''||f.oth==='')return 'OEM, AVS and Others quantities are required.';
+  return '';
+}
+const toEntry=f=>({ym:f.ym,oem:r2(parseFloat(f.oem)||0),avg:r2(parseFloat(f.avg)||0),oth:r2(parseFloat(f.oth)||0),inc:f.inc===''?null:r2(parseFloat(f.inc)),exp:f.exp===''?null:r2(parseFloat(f.exp))});
+
+const MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const CY=now.getFullYear(),CM=now.getMonth()+1;
+const YEARS=Array.from({length:CY-2019},(_,i)=>CY-i);
+function MonthSel({value,onChange}){
+  const [y,m]=value.split('-').map(Number);
+  const setY=ny=>{const nm=ny===CY&&m>CM?CM:m;onChange(ny+'-'+String(nm).padStart(2,'0'))};
+  return html`<div className="grid grid-cols-2 gap-2"><select className=${inCls} value=${m} onChange=${e=>onChange(y+'-'+String(e.target.value).padStart(2,'0'))}>${MN.map((n,i)=>html`<option key=${n} value=${i+1} disabled=${y===CY&&i+1>CM}>${n}</option>`)}</select><select className=${inCls} value=${y} onChange=${e=>setY(+e.target.value)}>${YEARS.map(v=>html`<option key=${v} value=${v}>${v}</option>`)}</select></div>`;
+}
+function mockData(){
+  const out=[];let seed=7;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280};
+  let y=CY-3,m=4;if(m>CM&&false){}
+  while(y<CY||(y===CY&&m<=CM)){
+    const ym=y+'-'+String(m).padStart(2,'0');
+    const oem=r2(800+rnd()*900),avg=r2(400+rnd()*600),oth=r2(150+rnd()*400);
+    const q=oem+avg+oth,inc=r2(q*(2800+rnd()*500)),exp=r2(q*(2500+rnd()*600));
+    const k=out.length;
+    out.push({mock:true,id:uid++,ts:Date.now()+k,ym,oem,avg,oth,inc:k%5===4?null:inc,exp:k%5===4?null:exp});
+    m++;if(m>12){m=1;y++}
+  }
+  return out;
+}
+let uid=1;
+
+function QtyTab({entries,setEntries,months}){
+  const [f,setF]=useState(blank),[err,setErr]=useState(''),[ok,setOk]=useState(''),[rfm,setRfm]=useState(''),[rfy,setRfy]=useState(''),[rtm,setRtm]=useState(''),[rty,setRty]=useState(''),[view,setView]=useState('monthly'),[ed,setEd]=useState(null),[conf,setConf]=useState(null),[dup,setDup]=useState(null),[eerr,setEerr]=useState('');
+  const nextYm=ym=>{let[y,m]=ym.split('-').map(Number);m++;if(m>12){m=1;y++}return y+'-'+String(m).padStart(2,'0')};
+  const nx=months.length?nextYm(months[months.length-1].ym):CUR,defYm=nx>CUR?CUR:nx;
+  const effYm=f.ym||defYm,existingM=months.find(x=>x.ym===effYm);
+  const shown=existingM?{ym:effYm,oem:existingM.oem.toFixed(2),avg:existingM.avg.toFixed(2),oth:existingM.oth.toFixed(2),inc:has(existingM.inc)?existingM.inc.toFixed(2):'',exp:has(existingM.exp)?existingM.exp.toFixed(2):''}:f;
+  const openEdit=m=>{setEerr('');setEd({orig:m.ym,ym:m.ym,oem:m.oem.toFixed(2),avg:m.avg.toFixed(2),oth:m.oth.toFixed(2),inc:has(m.inc)?m.inc.toFixed(2):'',exp:has(m.exp)?m.exp.toFixed(2):''})};
+  const submit=()=>{const ff={...f,ym:f.ym||defYm};const e=validate(ff);setErr(e);setOk('');if(e)return;if(months.find(x=>x.ym===ff.ym))return;setEntries([...entries,{...toEntry(ff),id:uid++,ts:Date.now()}]);setOk('Saved for '+mlabel(ff.ym,true)+'. Dashboard updated.');setF(blank)};
+  const earliest=months.length?months[0].ym:CUR,latest=months.length?months[months.length-1].ym:CUR;
+  const from=rfm&&rfy?rfy+'-'+rfm:earliest,to=rtm&&rty?rty+'-'+rtm:latest;
+  const fyR=x=>{const y=+x.slice(3,7),e=(y+1)+'-03';return{f:y+'-04',t:e>CUR?CUR:e}};
+  const fyVal=FYS.find(x=>{const r=fyR(x);return r.f===from&&r.t===to})||'';
+  const setFrom=ym=>{setRfm(ym.slice(5));setRfy(ym.slice(0,4));if(ym>to){setRtm(ym.slice(5));setRty(ym.slice(0,4))}},setTo=ym=>{setRtm(ym.slice(5));setRty(ym.slice(0,4))};
+  const pickFy=x=>{if(!x)return;const r=fyR(x);setFrom(r.f);setTo(r.t)};
+  const lifetime=()=>{setRfm('');setRfy('');setRtm('');setRty('');setView('monthly')};
+  const match=ym=>ym>=from&&ym<=to;
+  const fm=months.filter(m=>match(m.ym)).reverse();
+  const fe=entries.filter(e=>match(e.ym)).sort((a,b)=>b.ts-a.ts);
+  const saveEdit=()=>{const e=validate(ed)||(ed.ym!==ed.orig&&months.find(x=>x.ym===ed.ym)?'An entry for '+mlabel(ed.ym,true)+' already exists. Edit that month instead.':'');setEerr(e);if(e)return;setEntries([...entries.filter(x=>x.ym!==ed.orig),{...toEntry(ed),id:uid++,ts:Date.now()}]);setEd(null)};
+  const th="text-left px-3 py-2 text-xs uppercase tracking-wider";
+  const td="px-3 py-2 whitespace-nowrap font-semibold";
+  return html`<div className="space-y-5">
+    <${Panel} title="Add GGBS Entry">
+      <${FormFields} f=${shown} setF=${setF} defYm=${defYm} locked=${!!existingM} onYm=${v=>months.find(x=>x.ym===v)&&setDup(v)}/>
+      ${err&&html`<p className="mt-3 text-sm font-bold text-red-600">⚠ ${err}</p>`}${ok&&html`<p className="mt-3 text-sm font-bold text-green-600">✔ ${ok}</p>`}
+      <p className="mt-2 text-xs text-slate-500">One entry per month. To change an existing month's values, use Edit in the table below.</p>
+      ${existingM&&html`<p className="mt-3 text-sm font-bold text-red-600">🔒 ${mlabel(effYm,true)} is already submitted. Values are locked, so use Edit Entry to change them.</p>`}
+      <div className="mt-3 flex flex-wrap gap-2">${existingM?html`<button onClick=${()=>openEdit(existingM)} className="px-6 py-3 bg-blue-900 text-white font-black hover:bg-slate-900">Edit Entry</button>`:html`<button onClick=${submit} className="px-6 py-3 bg-slate-900 text-white font-black hover:bg-blue-900">Submit Entry</button>`}</div>
+    <//>
+    <${Panel} title="Filter & Manage Data">
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <label className="flex items-center gap-2 border-2 border-slate-900 bg-white px-2 py-1"><span className="text-xs font-black uppercase">Financial Year</span><select className="font-bold bg-white px-2 py-1 focus:outline-none" value=${fyVal} onChange=${e=>pickFy(e.target.value)}><option value="">Select FY</option>${[...FYS].reverse().map(x=>html`<option key=${x} value=${x}>${x}${x===CFY?' (Current)':''}</option>`)}</select></label>
+        <button onClick=${lifetime} className=${'px-4 py-2 border-2 border-blue-900 font-black text-sm '+(from===earliest&&to===latest?'bg-blue-900 text-white':'bg-white text-blue-900')}>Lifetime</button>
+        <button onClick=${lifetime} className="px-3 py-2 border-2 border-red-600 text-red-600 font-bold text-sm hover:bg-red-50">↺ Reset</button>
+      </div>
+      <div className="flex flex-col lg:flex-row lg:items-end gap-3 mb-3 border-2 border-slate-900 p-3 bg-slate-50">
+        ${[['From',from,setFrom],['To',to,setTo]].map(r=>{const isTo=r[0]==='To',fy0=from.slice(0,4),fm0=from.slice(5),fy1=to.slice(0,4),fm1=to.slice(5);
+          const mons=MN.map((n,i)=>[String(i+1).padStart(2,'0'),n]).filter(o=>o[0]===r[1].slice(5)||!((isTo&&r[1].slice(0,4)===fy0&&o[0]<fm0)||(!isTo&&r[1].slice(0,4)===fy1&&o[0]>fm1))),yrsO=YEARS.filter(y=>String(y)===r[1].slice(0,4)||(isTo?y>=+fy0:y<=+fy1));
+          return html`<div key=${r[0]} className="flex items-center gap-2"><span className="text-xs font-black uppercase w-10">${r[0]}</span><select className=${inCls+' mt-0'} value=${r[1].slice(5)} onChange=${e=>r[2](r[1].slice(0,4)+'-'+e.target.value)}>${mons.map(o=>html`<option key=${o[0]} value=${o[0]}>${o[1]}</option>`)}</select><select className=${inCls+' mt-0'} value=${r[1].slice(0,4)} onChange=${e=>{const ny=e.target.value;let nm=r[1].slice(5);if(isTo&&ny===fy0&&nm<fm0)nm=fm0;if(!isTo&&ny===fy1&&nm>fm1)nm=fm1;r[2](ny+'-'+nm)}}>${yrsO.map(v=>html`<option key=${v} value=${String(v)}>${v}</option>`)}</select></div>`})}
+        <span className="text-[11px] text-slate-500 font-semibold">Showing ${mlabel(from)} → ${mlabel(to)}</span>
+      </div>
+      <div className="flex gap-2 mb-3">${[['monthly','Monthly Aggregated'],['all','All Entries']].map(v=>html`<button key=${v[0]} onClick=${()=>setView(v[0])} className=${'px-4 py-2 font-bold text-sm border-2 border-blue-900 '+(view===v[0]?'bg-blue-900 text-white':'bg-white text-blue-900')}>${v[1]}</button>`)}</div>
+      ${(view==='monthly'?fm.length:fe.length)===0?html`<${Empty} text=${entries.length?'No records match your filters.':'No entries yet. Use the form above to add your first GGBS record.'}/>`:
+      html`<div className="overflow-x-auto border-2 border-slate-900 "><table className="w-full text-sm">
+        <thead className="bg-slate-900 text-white"><tr><th className=${th}>Month</th><th className=${th}>OEM</th><th className=${th}>AVS</th><th className=${th}>Others</th><th className=${th}>Total</th><th className=${th}>Income</th><th className=${th}>Expense</th><th className=${th}>P/L</th><th className=${th}>${view==='monthly'?'Actions':''}</th></tr></thead>
+        <tbody>${(view==='monthly'?fm:fe).map(m=>html`<tr key=${view==='monthly'?m.ym:m.id} className="border-t border-slate-200 odd:bg-slate-50">
+          <td className=${td}>${mlabel(m.ym)}</td>
+          <td className=${td}>${fmt(m.oem)}</td><td className=${td}>${fmt(m.avg)}</td><td className=${td}>${fmt(m.oth)}</td><td className=${td+' font-black'}>${fmt(total(m))}</td>
+          <td className=${td}><${Val} v=${m.inc} money=${true}/></td><td className=${td}><${Val} v=${m.exp} money=${true}/></td><td className=${td}><${PL} inc=${m.inc} exp=${m.exp}/></td>
+          <td className=${td}>${view==='monthly'?html`<button onClick=${()=>openEdit(m)} className="px-3 py-1 bg-blue-900 text-white font-bold mr-2">Edit</button><button onClick=${()=>setConf({msg:'Delete all entries for '+mlabel(m.ym,true)+'?',fn:()=>setEntries(entries.filter(x=>x.ym!==m.ym))})} className="px-3 py-1 bg-red-600 text-white font-bold">Delete</button>`:html`<button onClick=${()=>setEntries(entries.filter(x=>x.id!==m.id))} className="px-3 py-1 bg-red-600 text-white font-bold">Delete</button>`}</td>
+        </tr>`)}</tbody></table></div>`}
+    <//>
+    ${dup&&html`<div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center p-4 z-50"><div className="bg-white border-2 border-slate-900 p-5 w-full max-w-sm"><div className="text-2xl mb-1">⚠️</div><p className="font-black mb-1">${mlabel(dup,true)} already has an entry</p><p className="text-sm text-slate-600 mb-4">Only one entry is allowed per month. Please change its values in the Edit window instead.</p><div className="flex gap-2"><button onClick=${()=>{const mm=months.find(x=>x.ym===dup);setDup(null);mm&&openEdit(mm)}} className="px-5 py-2 bg-blue-900 text-white font-black">Go to Edit</button><button onClick=${()=>setDup(null)} className="px-5 py-2 border-2 border-slate-900 font-bold">Close</button></div></div></div>`}
+    ${conf&&html`<div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center p-4 z-50"><div className="bg-white border-2 border-slate-900 p-5 w-full max-w-sm"><p className="font-black mb-4">${conf.msg}</p><div className="flex gap-2"><button onClick=${()=>{conf.fn();setConf(null)}} className="px-5 py-2 bg-red-600 text-white font-black">Delete</button><button onClick=${()=>setConf(null)} className="px-5 py-2 border-2 border-slate-900 font-bold">Cancel</button></div></div></div>`}
+    ${ed&&html`<div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center p-4 z-50"><div className="bg-white border-2 border-slate-900 p-5 w-full max-w-3xl max-h-full overflow-auto">
+      <h3 className="font-black text-lg mb-3">Edit ${mlabel(ed.orig,true)}</h3>
+      <${FormFields} f=${ed} setF=${setEd}/>${eerr&&html`<p className="mt-3 text-sm font-bold text-red-600">⚠ ${eerr}</p>`}
+      <div className="mt-4 flex gap-2"><button onClick=${saveEdit} className="px-5 py-2 bg-slate-900 text-white font-black">Save</button><button onClick=${()=>setEd(null)} className="px-5 py-2 border-2 border-slate-900 font-bold">Cancel</button></div></div></div>`}
+  </div>`;
+}
+
+function Login(){
+  const [u,setU]=useState(''),[p,setP]=useState(''),[e,setE]=useState(''),[b,setB]=useState(false);
+  const go=async()=>{setB(true);setE('');const r=await sb.auth.signInWithPassword({email:u.trim(),password:p});setB(false);if(r.error)setE(r.error.message)};
+  return html`<div className="min-h-screen bg-slate-900 flex items-center justify-center p-4"><div className="w-full max-w-md bg-white border-4 border-blue-900 p-6">
+    <div className="text-3xl mb-1">🏗️</div><h1 className="text-2xl font-black">GGBS Statistics</h1><p className="text-sm text-slate-500 mb-4">Sign in with your company account</p>
+    <input type="email" placeholder="Email" className=${inCls} value=${u} onChange=${x=>setU(x.target.value)}/>
+    <input type="password" placeholder="Password" className=${inCls} value=${p} onChange=${x=>setP(x.target.value)} onKeyDown=${x=>x.key==='Enter'&&go()}/>
+    ${e&&html`<p className="mt-2 text-sm font-bold text-red-600">${e}</p>`}
+    <button disabled=${b} onClick=${go} className="mt-4 w-full py-3 bg-blue-900 text-white font-black hover:bg-slate-900 disabled:opacity-50">${b?'Signing in…':'Login'}</button>
+  </div></div>`;
+}
+function App(){
+  const [user,setUser]=useState(null),[ready,setReady]=useState(false),[tab,setTab]=useState('dash'),[entries,setLocal]=useState([]),[msg,setMsg]=useState('');
+  const months=useMemo(()=>aggregate(entries),[entries]);
+  const load=async()=>{const r=await sb.from('entries').select('*').order('ym');if(r.error){setMsg('Could not load data: '+r.error.message);return}setLocal(r.data.map(fromRow))};
+  const loadUser=async ses=>{if(!ses){setUser(null);setReady(true);return}const r=await sb.from('profiles').select('role').eq('id',ses.user.id).maybeSingle();setUser({name:ses.user.email,role:r.data&&r.data.role==='master'?'master':'admin'});setReady(true)};
+  useEffect(()=>{if(!sb)return;const {data}=sb.auth.onAuthStateChange((ev,ses)=>{setTimeout(()=>loadUser(ses),0)});return()=>data.subscription.unsubscribe()},[]);
+  useEffect(()=>{if(!user)return;load();const ch=sb.channel('entries-live').on('postgres_changes',{event:'*',schema:'public',table:'entries'},load).subscribe();return()=>{sb.removeChannel(ch)}},[user&&user.name]);
+  const setEntries=async next=>{
+    const nx=new Set(next.map(e=>e.id)),cx=new Set(entries.map(e=>e.id));
+    const del=entries.filter(e=>!nx.has(e.id)),add=next.filter(e=>!cx.has(e.id));
+    setLocal(next);
+    try{
+      if(del.length){const r=await sb.from('entries').delete().in('id',del.map(e=>e.id));if(r.error)throw r.error}
+      if(add.length){const r=await sb.from('entries').insert(add.map(toRow));if(r.error)throw r.error}
+      setMsg('');
+    }catch(e){setMsg('Could not save: '+e.message)}
+    await load();
+  };
+  if(!sb)return html`<div className="min-h-screen bg-slate-900 flex items-center justify-center p-4"><div className="bg-white border-4 border-blue-900 p-6 max-w-lg"><h1 className="text-xl font-black mb-2">Setup needed</h1><p className="text-sm">The Supabase project URL and anon key have not been set. Open this file in a text editor, paste them between the quotes in the two CONFIG lines at the top of the script (the URL must start with https://), save it, then reload.</p></div></div>`;
+  if(!ready)return html`<div className="min-h-screen flex items-center justify-center font-bold text-slate-500">Loading…</div>`;
+  if(!user)return html`<${Login}/>`;
+  const tabs=[['dash','📊 Dashboard'],...(user.role==='master'?[['qty','📝 GGBS Summary']]:[])];
+  return html`<div className="min-h-screen">
+    <header className="bg-slate-900 text-white border-b-4 border-blue-700 sticky top-0 z-40" style=${{top:'env(safe-area-inset-top,0px)'}}><div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+      <div className="font-black text-lg mr-auto">GGBS Statistics</div>
+      <nav className="flex gap-2">${tabs.map(t=>html`<button key=${t[0]} onClick=${()=>setTab(t[0])} className=${'px-4 py-2 font-bold text-sm '+(tab===t[0]?'bg-white text-slate-900':'bg-blue-900 text-white')}>${t[1]}</button>`)}</nav>
+      <span className="text-xs text-blue-200 font-semibold">${user.name} · ${user.role==='master'?'Master Admin':'Admin'}</span>
+      <button onClick=${()=>sb.auth.signOut()} className="px-4 py-2 bg-red-600 font-bold text-sm">Logout</button>
+    </div></header>
+    <main className="max-w-6xl mx-auto p-4 sm:p-6">${msg&&html`<div className="mb-4 border-2 border-red-600 bg-red-50 text-red-700 font-bold p-3 flex justify-between"><span>⚠ ${msg}</span><button onClick=${()=>setMsg('')}>✕</button></div>`}${tab==='qty'&&user.role==='master'?html`<${QtyTab} entries=${entries} setEntries=${setEntries} months=${months}/>`:html`<${Dashboard} months=${months}/>`}</main>
+  </div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
