@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { sb } from '../lib/supabase';
 import { inCls } from './MonthSel';
 
-export function Login({ onDemoLogin }) {
+export function Login() {
   const [u, setU] = useState('');
   const [p, setP] = useState('');
   const [e, setE] = useState('');
@@ -22,7 +22,7 @@ export function Login({ onDemoLogin }) {
         setE(r.error.message);
       }
     } catch (err) {
-      setE(err.message || 'Network error connecting to Supabase. You can also use Local Demo Login below.');
+      setE(err.message || 'Network error connecting to Supabase.');
     } finally {
       setB(false);
     }
@@ -79,30 +79,6 @@ export function Login({ onDemoLogin }) {
           </button>
         </form>
 
-        <div className="mt-6 pt-5 border-t-2 border-dashed border-slate-300">
-          <p className="text-xs font-black uppercase tracking-wider text-slate-500 mb-2">
-            Local Demo Access (No Supabase required)
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => onDemoLogin && onDemoLogin({ name: 'master.admin@ggps.local', role: 'master' })}
-              className="px-3 py-2 bg-slate-900 text-white text-xs font-black hover:bg-blue-900 cursor-pointer text-center"
-            >
-              Master Admin
-            </button>
-            <button
-              type="button"
-              onClick={() => onDemoLogin && onDemoLogin({ name: 'viewer.admin@ggps.local', role: 'admin' })}
-              className="px-3 py-2 border-2 border-slate-900 text-slate-900 text-xs font-black hover:bg-slate-100 cursor-pointer text-center"
-            >
-              Admin Viewer
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2">
-            Master Admin has full access to <b>Dashboard</b> & <b>GGBS Summary</b> tab. Admin Viewer is view-only.
-          </p>
-        </div>
       </div>
     </div>
   );

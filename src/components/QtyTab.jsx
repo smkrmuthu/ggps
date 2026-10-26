@@ -5,7 +5,7 @@ import { inCls } from './MonthSel';
 import { fmt, total, has } from '../utils/formatters';
 import { mlabel, nextYm, CUR, FYS, CFY, fyR, MN, YEARS } from '../utils/dateUtils';
 
-let uid = 1000;
+let uid = -1; // temp ids are negative so they never collide with DB ids
 
 export function QtyTab({ entries = [], setEntries, months = [] }) {
   const [f, setF] = useState(blank);
@@ -58,7 +58,7 @@ export function QtyTab({ entries = [], setEntries, months = [] }) {
     if (e) return;
     if (months.find((x) => x.ym === ff.ym)) return;
 
-    setEntries([...entries, { ...toEntry(ff), id: uid++, ts: Date.now() }]);
+    setEntries([...entries, { ...toEntry(ff), id: uid--, ts: Date.now() }]);
     setOk(`Saved for ${mlabel(ff.ym, true)}. Dashboard updated.`);
     setF(blank);
   };
@@ -118,7 +118,7 @@ export function QtyTab({ entries = [], setEntries, months = [] }) {
 
     setEntries([
       ...entries.filter((x) => x.ym !== ed.orig),
-      { ...toEntry(ed), id: uid++, ts: Date.now() }
+      { ...toEntry(ed), id: uid--, ts: Date.now() }
     ]);
     setEd(null);
   };

@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { sb } from './lib/supabase';
 import { r2, has } from './utils/formatters';
-import { getMockData } from './utils/mockData';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
 import { QtyTab } from './components/QtyTab';
@@ -43,73 +42,33 @@ function aggregate(entries) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('ggps_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [user, setUser] = useState(null);
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState('dash');
-  const [entries, setLocal] = useState(() => {
-    const saved = localStorage.getItem('ggps_entries');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [entries, setLocal] = useState([]);
   const [msg, setMsg] = useState('');
 
   const months = useMemo(() => aggregate(entries), [entries]);
 
   const load = async () => {
-    if (!sb) {
-      if (!entries.length) {
-        setLocal(getMockData());
-      }
+    const r = await sb.from('entries').select('*').order('ym');
+    if (r.error) {
+      setMsg('Could not load data: ' + r.error.message);
       return;
     }
-    try {
-      const r = await sb.from('entries').select('*').order('ym');
-      if (r.error) {
-        if (!entries.length) setLocal(getMockData());
-        return;
-      }
-      if (r.data && r.data.length > 0) {
-        setLocal(r.data.map(fromRow));
-      } else if (!entries.length) {
-        setLocal(getMockData());
-      }
-    } catch {
-      if (!entries.length) setLocal(getMockData());
-    }
+    setLocal(r.data.map(fromRow));
   };
 
   const loadUser = async (ses) => {
     if (!ses) {
       setUser(null);
-      localStorage.removeItem('ggps_user');
+      setLocal([]);
       setReady(true);
       return;
     }
-    try {
-      const r = await sb
-        .from('profiles')
-        .select('role')
-        .eq('id', ses.user.id)
-        .maybeSingle();
-
-      const u = {
-        name: ses.user.email,
-        role: r.data && r.data.role === 'master' ? 'master' : 'admin'
-      };
-      setUser(u);
-      localStorage.setItem('ggps_user', JSON.stringify(u));
-    } catch {
-      const u = {
-        name: ses.user.email,
-        role: 'admin'
-      };
-      setUser(u);
-      localStorage.setItem('ggps_user', JSON.stringify(u));
-    } finally {
-      setReady(true);
-    }
+    const r = await sb.from('profiles').select('role').eq('id', ses.user.id).maybeSingle();
+    setUser({ name: ses.user.email, role: r.data && r.data.role === 'master' ? 'master' : 'admin' });
+    setReady(true);
   };
 
   useEffect(() => {
@@ -117,42 +76,23 @@ export default function App() {
       setReady(true);
       return;
     }
-    let dataSub;
-    try {
-      const { data } = sb.auth.onAuthStateChange((_ev, ses) => {
-        setTimeout(() => loadUser(ses), 0);
-      });
-      dataSub = data;
-    } catch {
-      setReady(true);
-    }
-    return () => dataSub?.subscription?.unsubscribe();
+    const { data } = sb.auth.onAuthStateChange((_ev, ses) => {
+      setTimeout(() => loadUser(ses), 0);
+    });
+    return () => data.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!user) return;
     load();
-    if (!sb) return;
-
-    try {
-      const ch = sb
-        .channel('entries-live')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'entries' }, load)
-        .subscribe();
-
-      return () => {
-        sb.removeChannel(ch);
-      };
-    } catch {
-      // offline / local fallback
-    }
+    const ch = sb
+      .channel('entries-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'entries' }, load)
+      .subscribe();
+    return () => {
+      sb.removeChannel(ch);
+    };
   }, [user?.name]);
-
-  useEffect(() => {
-    if (entries.length > 0) {
-      localStorage.setItem('ggps_entries', JSON.stringify(entries));
-    }
-  }, [entries]);
 
   const setEntries = async (next) => {
     const nx = new Set(next.map((e) => e.id));
@@ -161,42 +101,40 @@ export default function App() {
     const add = next.filter((e) => !cx.has(e.id));
 
     setLocal(next);
-
-    if (sb) {
-      try {
-        if (del.length) {
-          const r = await sb.from('entries').delete().in('id', del.map((e) => e.id));
-          if (r.error) throw r.error;
-        }
-        if (add.length) {
-          const r = await sb.from('entries').insert(add.map(toRow));
-          if (r.error) throw r.error;
-        }
-        setMsg('');
-      } catch (e) {
-        setMsg('Saved locally (' + e.message + ')');
+    try {
+      if (del.length) {
+        const r = await sb.from('entries').delete().in('id', del.map((e) => e.id));
+        if (r.error) throw r.error;
       }
+      if (add.length) {
+        const r = await sb.from('entries').insert(add.map(toRow));
+        if (r.error) throw r.error;
+      }
+      setMsg('');
+    } catch (e) {
+      setMsg('Could not save: ' + e.message);
     }
-  };
-
-  const handleDemoLogin = (demoUser) => {
-    setUser(demoUser);
-    localStorage.setItem('ggps_user', JSON.stringify(demoUser));
-    if (!entries.length) {
-      setLocal(getMockData());
-    }
-    setReady(true);
+    await load();
   };
 
   const handleLogout = () => {
-    setUser(null);
-    localStorage.removeItem('ggps_user');
-    if (sb) {
-      sb.auth.signOut().catch(() => {});
-    }
+    sb.auth.signOut();
   };
 
-  if (!ready && !user) {
+  if (!sb) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="bg-white border-4 border-blue-900 p-6 max-w-lg">
+          <h1 className="text-xl font-black mb-2">Setup needed</h1>
+          <p className="text-sm">
+            VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY were not set when this app was built.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center font-bold text-slate-500 bg-slate-50">
         Loading…
@@ -205,12 +143,13 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login onDemoLogin={handleDemoLogin} />;
+    return <Login />;
   }
 
+  const isMaster = user.role === 'master';
   const tabs = [
     ['dash', '📊 Dashboard'],
-    ['qty', '📝 Data Entry']
+    ...(isMaster ? [['qty', '📝 GGBS Summary']] : [])
   ];
 
   return (
@@ -266,7 +205,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'qty' ? (
+        {tab === 'qty' && isMaster ? (
           <QtyTab entries={entries} setEntries={setEntries} months={months} />
         ) : (
           <Dashboard months={months} />

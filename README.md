@@ -4,7 +4,7 @@ Standalone dashboard and management application for tracking Ground Granulated B
 
 ## Tech Stack
 - **Frontend**: React 18, Vite
-- **Styling**: Tailored brutalist design system with Tailwind CSS & custom variables
+- **Styling**: Tailwind CSS 3 (compiled at build time)
 - **Backend / DB**: Supabase (Authentication, PostgreSQL Database, Realtime Subscriptions)
 
 ## Quick Start
@@ -23,6 +23,15 @@ Standalone dashboard and management application for tracking Ground Granulated B
    ```bash
    npm run build
    ```
+
+## Backend setup
+1. Create a Supabase project and run [supabase/schema.sql](supabase/schema.sql) in the SQL editor (tables, RLS, realtime).
+2. Create users under Auth > Users; promote one to `master` using the snippet at the bottom of the schema file.
+   Master Admins can add/edit/delete entries; Admins get a read-only dashboard. This is enforced by RLS, not just the UI.
+
+## Deploying to ggps.oneuptech.co
+It is a static site: `npm run build` outputs `dist/`. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the host's build environment (they are baked in at build time), publish `dist/`, and point a CNAME for `ggps` at the host.
+In Supabase, set Auth > URL Configuration > Site URL to `https://ggps.oneuptech.co`.
 
 ## Configuration
 
