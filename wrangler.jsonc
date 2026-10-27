@@ -2,5 +2,5 @@
   "name": "ggps",
   "compatibility_date": "2026-10-01",
   "assets": { "directory": "./dist" },
-  "routes": [{ "pattern": "ggbs.oneuptech.co", "custom_domain": true }]
+  "routes": [{ "pattern": "mtpl.oneuptech.co", "custom_domain": true }]
 }
